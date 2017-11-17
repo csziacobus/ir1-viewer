@@ -504,17 +504,17 @@
 
 ;;; IR1 Presentation
 (labels ((present-instance-slots-clim (thing stream)
-           (let ((slots (clim-mop:class-slots (class-of thing))))
+           (let ((slots (closer-mop:class-slots (class-of thing))))
              (formatting-table (stream)
                (dolist (slot slots)
                  (formatting-row (stream)
                    (formatting-cell (stream)
-                     (present (clim-mop:slot-definition-name slot)
+                     (present (closer-mop:slot-definition-name slot)
 			      'symbol
 			      :stream stream))
                    (formatting-cell (stream)
-                     (if (slot-boundp thing (clim-mop:slot-definition-name slot))
-                         (let ((val (slot-value thing (clim-mop:slot-definition-name slot))))
+                     (if (slot-boundp thing (closer-mop:slot-definition-name slot))
+                         (let ((val (slot-value thing (closer-mop:slot-definition-name slot))))
 			   (present val (presentation-type-of val) :stream stream))
                          (format stream "<unbound>"))))))))
          
@@ -574,9 +574,11 @@
 
 (macrolet ((def (ir1)
 	     `(defmethod print-object :around ((ctran ,ir1) stream)
-		(let ((sb-c::*continuation-numbers* *copy-of-continuation-numbers*)
-		      ( sb-c::*number-continuations* *copy-of-number-continuations*))
-		  (call-next-method)))))
+		(let nil
+                  #+(or)
+                    ((sb-c::*continuation-numbers* *copy-of-continuation-numbers*)
+                     ( sb-c::*number-continuations* *copy-of-number-continuations*))
+                  (call-next-method)))))
   (def sb-c::ctran)
   (def sb-c::lvar)
   (def sb-c::cblock))

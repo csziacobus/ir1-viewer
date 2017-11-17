@@ -5,7 +5,7 @@
   :description "IR1 (a.k.a ICR) Viewer for SBCL Compiler"
   :author "onixie@gmail.com"
   :license "public domain"
-  :depends-on (#:mcclim)
+  :depends-on (#:mcclim #:closer-mop)
   :components ((:file "package")
                (:file "ir1-viewer")))
 

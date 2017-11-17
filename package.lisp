@@ -1,7 +1,7 @@
 ;;;; package.lisp
 
 (defpackage #:ir1-viewer
-  (:use #:clim-lisp #:clim)
+  (:use #:clim-lisp #:clim #:closer-mop)
   (:import-from #:sb-c
 		#:awhen #:it
 		#:symbolicate
