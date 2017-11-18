@@ -585,7 +585,7 @@
 
 (define-presentation-method present (ir1 (type ir1) stream view &key acceptably)
   (declare (ignorable acceptably))
-  (print ir1))
+  (print ir1 stream))
 
 (defmacro define-ir1-presentation (((&rest types) stream) &body body)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
