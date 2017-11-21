@@ -469,7 +469,7 @@
 
 (defun run-viewer (clambda)
   (let ((ir1-flow (make-ir1-flow clambda)))
-    (find-application-frame 'ir1-viewer :ir1-flow ir1-flow :create t :own-process t :frame-class 'ir1-viewer)))
+    (find-application-frame 'ir1-viewer :ir1-flow ir1-flow :create t :frame-class 'ir1-viewer :own-process t)))
 
 (defun draw-flow-pane (frame stream)
   (draw-flow (ir1-flow frame) stream))
@@ -614,10 +614,10 @@
              ((type ,sb-type) record (stream flow-pane) state)
            (let* ((component-region (region-component (car (ir1-flow *application-frame*))))
                   (ir1 (presentation-object record))
-                  (reg (bounding-rectangle flow-record)))
+                  (reg (bounding-rectangle record)))
              (ecase state
                (:highlight
-                (region-clear stream frecord)
+                (region-clear stream record)
                 (with-scaling (stream *flow-current-scaling*)
                   (with-translation (stream (- (min-x component-region)) (- (min-y component-region)))
                     (with-drawing-options (stream :line-thickness 2 :ink +red+ :text-face :bold)
@@ -791,50 +791,53 @@
 (define-condition view-ir1 (simple-condition)
   ((clambda :initarg :clambda :reader clambda)))
 
-(defmacro view (form-being-compiled)
-  (with-unique-names (make-functional-from-toplevel-lambda %simple-eval)
-    `(progn
-       (eval-when (:compile-toplevel :execute)
-	 (unlock-package (find-package :sb-c))
-	 (unlock-package (find-package :sb-impl))
-	 
-	 (let ((,%simple-eval (symbol-function 'sb-impl::%simple-eval))
-	       (,make-functional-from-toplevel-lambda (symbol-function 'sb-c::make-functional-from-toplevel-lambda)))
-	   (setf
-	    (symbol-function 'sb-impl::%simple-eval)
-	    (lambda (expr lexenv)
-	      (setf (symbol-function 'sb-impl::%simple-eval) ,%simple-eval)
-	      (handler-case (let ((*error-output* (make-string-output-stream)))
-			      (funcall ,%simple-eval expr lexenv))
-		(condition () (print-log "returning~%")
-			   ,(cond
-			     ((eq (car form-being-compiled) 'defun)
-			      `(symbol-function (compile ',(cadr form-being-compiled) (lambda ,(caddr form-being-compiled) ,@(cdddr form-being-compiled)))))
-			     ((eq (car form-being-compiled) 'lambda)
-			      `(compile nil ,form-being-compiled))
-			     ((eq (car form-being-compiled) 'eval-when)
-			      `(compile nil (lambda () ,@(cddr form-being-compiled))))
-			     (t
-			      `(compile nil (lambda () ,form-being-compiled)))))))
-	    
-	    (symbol-function 'sb-c::make-functional-from-toplevel-lambda)
-	    (lambda (lambda-expression &key name (path (sb-c::missing-arg)))
-	      (setf (symbol-function 'sb-c::make-functional-from-toplevel-lambda) ,make-functional-from-toplevel-lambda)
-	      (print-log "compiling ~a~%" lambda-expression)
-	      (let ((clambda (funcall ,make-functional-from-toplevel-lambda lambda-expression :name name :path path)))
-		(setf *copy-of-continuation-numbers* sb-c::*continuation-numbers*
-		      *copy-of-number-continuations* sb-c::*number-continuations*)
-		(print-log "viewing ~a~%" clambda)
-		(run-viewer clambda)
-		
-		(signal 'view-ir1 :clambda clambda)
-		clambda)))))
-       ,(cond ((member (car form-being-compiled) '(defun lambda named-lambda))
-	       form-being-compiled)
-	      ((eq (car form-being-compiled) 'eval-when)
-	       `(lambda () ,@(cddr form-being-compiled)))
-	      (t
-	       `(lambda () ,form-being-compiled))))))
+(defun coerce-to-lambda-form (functoid-form)
+  (case (first functoid-form)
+    ((defun sb-int:named-lambda) `(lambda () ,(cadddr functoid-form)))
+    ((lambda) functoid-form)
+    (eval-when `(lambda () ,@(cddr functoid-form)))
+    (otherwise `(lambda () ,functoid-form))))
+
+(defun capture-and-view-next-compile ()
+  (unlock-package (find-package "SB-C"))
+  (unlock-package (find-package "SB-IMPL"))
+  (let ((%simple-eval (symbol-function 'sb-impl::%simple-eval))
+        (make-functional-from-toplevel-lambda (symbol-function 'sb-c::make-functional-from-toplevel-lambda)))
+    (setf (symbol-function 'sb-impl::%simple-eval)
+          (lambda (expr lexenv)
+            (setf (symbol-function 'sb-impl::%simple-eval)
+                  %simple-eval)
+            (handler-case (let ((*error-output* (make-string-output-stream)))
+                            (funcall %simple-eval expr lexenv))
+              (condition (condition)
+                (print-log "returning~%")
+                (values (compile nil (coerce-to-lambda-form expr))
+                        (clambda condition)))))
+          (symbol-function 'sb-c::make-functional-from-toplevel-lambda)
+          (lambda (lambda-expression &key name
+                                     (path (sb-c::missing-arg)))
+            (setf (symbol-function 'sb-c::make-functional-from-toplevel-lambda)
+                  make-functional-from-toplevel-lambda)
+            (print-log "compiling ~a~%" lambda-expression)
+            (let ((clambda (funcall make-functional-from-toplevel-lambda
+                                    lambda-expression
+                                    :name name
+                                    :path path)))
+              #+nil
+              (setf *copy-of-continuation-numbers* sb-c::*continuation-numbers*
+                    *copy-of-number-continuations* sb-c::*number-continuations*)
+              (print-log "viewing ~a~%" clambda)
+              (run-viewer clambda)
+              (signal 'view-ir1 :clambda clambda)
+              clambda)))))
+
+(defmacro view (form)
+  `(progn
+     (capture-and-view-next-compile)
+     ,(case (first form)
+        ((defun sb-int:named-lambda lambda) form)
+        (eval-when `(lambda () ,@(cddr form)))
+        (otherwise `(lambda () ,form)))))
 
 ;;; Dump PS file
 (defmethod window-clear (pane) nil)
