@@ -4,6 +4,9 @@
 
 ;;; "ir1-viewer" goes here. Hacks and glory await!
 
+(defclass flow-view (gadget-view) ())
+(defparameter +flow-view+ (make-instance 'flow-view))
+
 ;;; Flow Stuffs
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (let ((display (xlib::open-default-display)))
@@ -87,15 +90,16 @@
 
 (defun draw-text-in-bounding-rectangle* (stream text bound location &rest args)
   (let* ((old-size (getf args :text-size 256))
-	 (record (with-output-to-output-record (stream) (apply #'draw-text* stream text
-							       (case location
-								 ((:bottomleft :topleft) (1+ (min-x bound)))
-								 ((:bottomright :topright) (1- (max-x bound)))
-								 (t (center-of (min-x bound) (max-x bound))))
-							       (case location
-								 ((:topright :topleft) (1+ (min-y bound)))
-								 ((:bottomright :bottomleft) (1- (max-y bound)))
-								 (t (center-of (min-y bound) (max-y bound)))) args)))
+	 (record (with-output-to-output-record (stream)
+                   (apply #'draw-text* stream text
+                          (case location
+                            ((:bottomleft :topleft) (1+ (min-x bound)))
+                            ((:bottomright :topright) (1- (max-x bound)))
+                            (t (center-of (min-x bound) (max-x bound))))
+                          (case location
+                            ((:topright :topleft) (1+ (min-y bound)))
+                            ((:bottomright :bottomleft) (1- (max-y bound)))
+                            (t (center-of (min-y bound) (max-y bound)))) args)))
 	 (rec-bound (bounding-rectangle record))
 	 (rec-bound-width (bounding-rectangle-width rec-bound)) 
 	 (text-x (case location
@@ -409,7 +413,8 @@
 
 (defun previous-of (ir1)
   (typecase ir1
-    (sb-c::ctran (unless (eq (sb-c::ctran-kind ir1) :block-start) (sb-c::ctran-use ir1)))
+    (sb-c::ctran (and (not (eq (sb-c::ctran-kind ir1) :block-start))
+                      (sb-c::ctran-use ir1)))
     (sb-c::node (sb-c::node-prev ir1))
     (sb-c::lvar (ensure-list (sb-c::lvar-uses ir1)))
     (sb-c::cblock (sb-c::block-pred ir1))
@@ -435,29 +440,30 @@
   nil)
 
 ;;; Clim
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defclass flow-view (gadget-view) ())
-  (defparameter +flow-view+ (make-instance 'flow-view)))
+(defclass flow-pane (clim-stream-pane) ())
+(defclass info-pane (clim-stream-pane) ())
 
 (define-application-frame ir1-viewer ()
   ((ir1-flow :reader ir1-flow :initarg :ir1-flow))
   (:pointer-documentation t)
   (:panes
    (flow :application
-	 :display-function #'draw-flow-pane
-	 :display-time nil
-	 :end-of-page-action :allow
-	 :scroll-bars :both
-	 :default-view +flow-view+)
+         :type 'flow-pane
+         :display-function #'draw-flow-pane
+         :display-time nil
+         :end-of-page-action :allow
+         :scroll-bars :both
+         :default-view +flow-view+)
    (info :application
-	 :display-time nil
-	 :scroll-bars :both
-	 :default-view +textual-view+))
+         :type 'info-pane
+         :display-time nil
+         :scroll-bars :both
+         :default-view +textual-view+))
   (:layouts
    (default
-       (horizontally ()
-	 (2/3 flow)
-	 (1/3 info)))
+    (horizontally ()
+      (2/3 flow)
+      (1/3 info)))
    (only-flow
     flow)))
 
@@ -468,16 +474,21 @@
 (defun draw-flow-pane (frame stream)
   (draw-flow (ir1-flow frame) stream))
 
+(defvar *presentation-object-map* (make-hash-table))
+
 (defun draw-flow (ir1-flow stream &key (view +flow-view+))
   (window-clear stream)
+  (clrhash *presentation-object-map*)
   (let ((component-region (region-component (car ir1-flow))))
     (with-scaling (stream *flow-current-scaling*)
       (with-translation (stream (- (min-x component-region)) (- (min-y component-region)))
 	(with-drawing-options (stream)
-	  (loop for ir1 being each hash-key in (cdr ir1-flow)
+	  (loop for ir1 being each hash-key in (rest ir1-flow)
 	     do (progn
 		  (draw-ir1-extra ir1 stream ir1-flow)
-		  (present ir1 (presentation-type-of ir1) :stream stream :view view))))))))
+                  (setf (gethash ir1 *presentation-object-map*)
+                        ;; used for side-effect
+                        (present ir1 (presentation-type-of ir1) :stream stream :view view)))))))))
 
 (define-ir1-viewer-command com-describe ((ir1 'ir1))
   (when (eq (frame-current-layout *application-frame*) 'default)
@@ -535,7 +546,9 @@
   (defmethod describe-object ((thing structure-object) (stream application-pane))
     (describe-instance thing "a structure" stream)))
 
-(defstruct (ir1 (:constructor make-ir1 ())) (|bogus-can't-be-instantiated| (error "ir1 is not a concrete ir1 thing.")))
+(defstruct (ir1 (:constructor make-ir1 ()))
+  (|bogus-can't-be-instantiated|
+   (error "ir1 is not a concrete ir1 thing.")))
 
 (defmacro define-ir1-presentation-type ((&rest types) &rest args)
   `(eval-when (:compile-toplevel :load-toplevel :execute)
@@ -570,7 +583,7 @@
 			       sb-c::optional-dispatch) () :inherit-from 'sb-c::functional)
 
 (define-presentation-to-command-translator describe (ir1 com-describe ir1-viewer :gesture :select) (object)
-  `(,object))
+  (list object))
 
 (macrolet ((def (ir1)
 	     `(defmethod print-object :around ((ctran ,ir1) stream)
@@ -583,35 +596,47 @@
   (def sb-c::lvar)
   (def sb-c::cblock))
 
-(define-presentation-method present (ir1 (type ir1) stream view &key acceptably)
-  (declare (ignorable acceptably))
+(define-presentation-method present (ir1 (type ir1) stream view &key)
   (print ir1 stream))
 
 (defmacro define-ir1-presentation (((&rest types) stream) &body body)
-  `(eval-when (:compile-toplevel :load-toplevel :execute)
-     ,@(when (and types
-		  (/= 0 (or (position :as types) -1)))
-	     (let* ((as-nm (cadr (member :as types)))
-		    (type-nm (car types))
-		    (draw-fn (symbolicate 'draw- type-nm))
-		    (sb-type (intern (symbol-name type-nm) :sb-c)))
-	       `((defun ,draw-fn (,(or as-nm type-nm) ,stream) ,@body)
-		 (define-presentation-method present (,type-nm (type ,sb-type) stream (view (eql +flow-view+)) &key acceptably)
-		   (declare (ignore acceptably))
-		   (funcall #',draw-fn ,type-nm stream))
-		 (define-presentation-method highlight-presentation
-		     ((type ,sb-type) record stream state)
-		   (let ((component-region (region-component (car (ir1-flow *application-frame*))))
-			 (ir1 (presentation-object record))
-			 (reg (bounding-rectangle record)))
-		     (case state
-		       (:highlight (region-clear stream record)
-				   (with-scaling (stream *flow-current-scaling*)
-				     (with-translation (stream (- (min-x component-region)) (- (min-y component-region)))
-				       (with-drawing-options (stream :line-thickness 2 :ink +red+ :text-face :bold)
-					 (funcall #',draw-fn ir1 stream)))))
-		       (t (repaint-sheet stream (make-bounding-rectangle (1- (min-x reg)) (1- (min-y reg)) (max-x reg) (max-y reg)))))))
-		 (define-ir1-presentation (,(cdr types) stream) ,@body))))))
+  (when (and types
+             (/= 0 (or (position :as types) -1)))
+    (let* ((as-nm (second (member :as types)))
+           (type-nm (first types))
+           (draw-fn (symbolicate 'draw- type-nm))
+           (sb-type (intern (symbol-name type-nm) :sb-c)))
+      `(progn
+         (defun ,draw-fn (,(or as-nm type-nm) ,stream) ,@body)
+         (define-presentation-method present (,type-nm (type ,sb-type) stream (view flow-view) &key)
+           (,draw-fn ,type-nm stream))
+         (define-presentation-method highlight-presentation
+             ((type ,sb-type) record (stream flow-pane) state)
+           (let* ((component-region (region-component (car (ir1-flow *application-frame*))))
+                  (ir1 (presentation-object record))
+                  (reg (bounding-rectangle flow-record)))
+             (ecase state
+               (:highlight
+                (region-clear stream frecord)
+                (with-scaling (stream *flow-current-scaling*)
+                  (with-translation (stream (- (min-x component-region)) (- (min-y component-region)))
+                    (with-drawing-options (stream :line-thickness 2 :ink +red+ :text-face :bold)
+                      (,draw-fn ir1 stream)))))
+               (:unhighlight
+                (repaint-sheet stream
+                               (make-bounding-rectangle (1- (min-x reg))
+                                                        (1- (min-y reg))
+                                                        (max-x reg)
+                                                        (max-y reg)))))))
+         (define-presentation-method highlight-presentation
+             ((type ,sb-type) record (stream info-pane) state)
+           (clim-internals::highlight-presentation-1
+            (gethash (presentation-object record)
+                     *presentation-object-map*)
+            (get-frame-pane *application-frame* 'flow)
+            state)
+           (call-next-method))
+         (define-ir1-presentation (,(cdr types) stream) ,@body)))))
 
 (define-ir1-presentation ((node) stream)
   (with-valid-region (region-node node)
@@ -728,35 +753,36 @@
   (format nil "~a" (type-of ir1)))
 
 (defmethod label-ir1 ((ir1 sb-c::node))
-  (handler-case (if (sb-c::ref-p ir1)
-		    (let ((leaf (sb-c::ref-leaf ir1)))
-		      (if (sb-c::functional-p leaf)
-			  (format nil "~a:~s {~x}"
-				  (type-of ir1)
-				  (or (sb-c::functional-%debug-name leaf) (sb-c::functional-%source-name leaf))
-				  (sb-c::get-lisp-obj-address leaf))
-			  (if (sb-c::constant-p leaf)
-			      (format nil "~a:~a"
-				      (type-of ir1)
-				      (let ((value (sb-c::constant-value leaf)))
-					(if (consp value)
-					    (format nil "(LIST ~{~s~^ ~s~})"
-						    (mapcar (lambda (val)
-							      (if (sb-c::leaf-p val)
-								  (sb-c::leaf-%source-name val)
-								  val)) value))
-					    (format nil "~s"
-						    (if (sb-c::leaf-p value)
-							(sb-c::leaf-%source-name value)
-							value)))))
-			      (format nil "~a:~s"
-				      (type-of ir1)
-				      (sb-c::leaf-%source-name leaf)))))
-		    (let ((form (sb-c::node-source-form ir1)))
-		      (format nil "~a:~s" (type-of ir1)
-			      (if (sb-c::leaf-p form)
-				  (or (sb-c::leaf-%debug-name form) (sb-c::leaf-%source-name form))
-				  form))))
+  (handler-case
+      (if (sb-c::ref-p ir1)
+          (let ((leaf (sb-c::ref-leaf ir1)))
+            (if (sb-c::functional-p leaf)
+                (format nil "~a:~s {~x}"
+                        (type-of ir1)
+                        (or (sb-c::functional-%debug-name leaf) (sb-c::functional-%source-name leaf))
+                        (sb-c::get-lisp-obj-address leaf))
+                (if (sb-c::constant-p leaf)
+                    (format nil "~a:~a"
+                            (type-of ir1)
+                            (let ((value (sb-c::constant-value leaf)))
+                              (if (consp value)
+                                  (format nil "(LIST ~{~s~^ ~s~})"
+                                          (mapcar (lambda (val)
+                                                    (if (sb-c::leaf-p val)
+                                                        (sb-c::leaf-%source-name val)
+                                                        val)) value))
+                                  (format nil "~s"
+                                          (if (sb-c::leaf-p value)
+                                              (sb-c::leaf-%source-name value)
+                                              value)))))
+                    (format nil "~a:~s"
+                            (type-of ir1)
+                            (sb-c::leaf-%source-name leaf)))))
+          (let ((form (sb-c::node-source-form ir1)))
+            (format nil "~a:~s" (type-of ir1)
+                    (if (sb-c::leaf-p form)
+                        (or (sb-c::leaf-%debug-name form) (sb-c::leaf-%source-name form))
+                        form))))
     (error () (format nil "~a" (type-of ir1)))))
 
 ;;; Top Interface
