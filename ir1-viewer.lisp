@@ -440,45 +440,47 @@
   nil)
 
 ;;; Clim
-(defclass flow-pane (clim-stream-pane) ())
-(defclass info-pane (clim-stream-pane) ())
+(defclass flow-pane (application-pane) ())
+(defclass info-pane (application-pane) ())
 
 (define-application-frame ir1-viewer ()
-  ((ir1-flow :reader ir1-flow :initarg :ir1-flow))
+  ((ir1-flow :reader ir1-flow :initarg :ir1-flow)
+   (ir1-node-flow-presentations :reader ir1-node-flow-presentations :initform (make-hash-table)))
   (:pointer-documentation t)
   (:panes
-   (flow :application
-         :type 'flow-pane
-         :display-function #'draw-flow-pane
-         :display-time nil
-         :end-of-page-action :allow
-         :scroll-bars :both
-         :default-view +flow-view+)
-   (info :application
-         :type 'info-pane
-         :display-time nil
-         :scroll-bars :both
-         :default-view +textual-view+))
+   ;; clim kludge: having the pane specifier name be the same
+   ;; as in the macro confuses find-pane-named
+   (flow-graph (make-clim-stream-pane :type 'flow-pane
+                                      :name 'flow
+                                      :display-function #'draw-flow-pane
+                                      :display-time nil
+                                      :end-of-page-action :allow
+                                      :scroll-bars :both
+                                      :default-view +flow-view+))
+   (annotation (make-clim-stream-pane :type 'info-pane
+                                      :name 'info
+                                      :display-time nil
+                                      :scroll-bars :both
+                                      :default-view +textual-view+)))
   (:layouts
    (default
     (horizontally ()
-      (2/3 flow)
-      (1/3 info)))
+      (2/3 flow-graph)
+      (1/3 annotation)))
    (only-flow
-    flow)))
+    flow-graph)))
 
 (defun run-viewer (clambda)
   (let ((ir1-flow (make-ir1-flow clambda)))
     (find-application-frame 'ir1-viewer :ir1-flow ir1-flow :create t :frame-class 'ir1-viewer :own-process t)))
 
 (defun draw-flow-pane (frame stream)
-  (draw-flow (ir1-flow frame) stream))
+  (draw-flow (ir1-flow frame)
+             (ir1-node-flow-presentations frame)
+             stream))
 
-(defvar *presentation-object-map* (make-hash-table))
-
-(defun draw-flow (ir1-flow stream &key (view +flow-view+))
+(defun draw-flow (ir1-flow presentation-map stream &key (view +flow-view+))
   (window-clear stream)
-  (clrhash *presentation-object-map*)
   (let ((component-region (region-component (car ir1-flow))))
     (with-scaling (stream *flow-current-scaling*)
       (with-translation (stream (- (min-x component-region)) (- (min-y component-region)))
@@ -486,13 +488,13 @@
 	  (loop for ir1 being each hash-key in (rest ir1-flow)
 	     do (progn
 		  (draw-ir1-extra ir1 stream ir1-flow)
-                  (setf (gethash ir1 *presentation-object-map*)
+                  (setf (gethash ir1 presentation-map)
                         ;; used for side-effect
                         (present ir1 (presentation-type-of ir1) :stream stream :view view)))))))))
 
 (define-ir1-viewer-command com-describe ((ir1 'ir1))
   (when (eq (frame-current-layout *application-frame*) 'default)
-    (let ((stream (get-frame-pane *application-frame* 'info)))
+    (let ((stream (find-pane-named *application-frame* 'info)))
       (window-clear stream)
       (handler-case (describe ir1 stream)
 	(error (e) (notify-user *application-frame* (format nil "~a" e)))))))
@@ -630,11 +632,12 @@
                                                         (max-y reg)))))))
          (define-presentation-method highlight-presentation
              ((type ,sb-type) record (stream info-pane) state)
-           (clim-internals::highlight-presentation-1
-            (gethash (presentation-object record)
-                     *presentation-object-map*)
-            (get-frame-pane *application-frame* 'flow)
-            state)
+           (let ((frame *application-frame*))
+             (clim-internals::highlight-presentation-1
+              (gethash (presentation-object record)
+                       (ir1-node-flow-presentations frame))
+              (find-pane-named frame 'flow)
+              state))
            (call-next-method))
          (define-ir1-presentation (,(cdr types) stream) ,@body)))))
 
