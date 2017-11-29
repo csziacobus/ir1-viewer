@@ -577,6 +577,7 @@
 (define-ir1-presentation-type (sb-c::bind
 			       sb-c::cast
 			       sb-c::cif
+                               sb-c::cset
 			       sb-c::creturn
 			       sb-c::entry
 			       sb-c::exit
