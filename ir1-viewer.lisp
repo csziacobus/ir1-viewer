@@ -24,14 +24,14 @@
 (defvar *flow-block-x-spacing* (* 2 *flow-x-spacing*))
 (defvar *flow-block-y-spacing* *flow-y-spacing*)
 
-(defvar *flow-lvar-x-spacing-ratio* 3)
+(defparameter *flow-lvar-x-spacing-ratio* 3)
 
-(defvar *flow-margin-ratio-x* 1)
-(defvar *flow-margin-ratio-y* 1)
-(defvar *flow-clambda-margin-ratio-x* 1/3)
-(defvar *flow-clambda-margin-ratio-y* 1/3)
-(defvar *flow-block-margin-ratio-x* 2)
-(defvar *flow-block-margin-ratio-y* 0)
+(defparameter *flow-margin-ratio-x* 1)
+(defparameter *flow-margin-ratio-y* 1)
+(defparameter *flow-clambda-margin-ratio-x* 1/3)
+(defparameter *flow-clambda-margin-ratio-y* 1/3)
+(defparameter *flow-block-margin-ratio-x* 2)
+(defparameter *flow-block-margin-ratio-y* 0)
 
 (defvar *copy-of-continuation-numbers* nil)
 (defvar *copy-of-number-continuations* nil)
