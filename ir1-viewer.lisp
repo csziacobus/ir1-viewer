@@ -472,7 +472,12 @@
 
 (defun run-viewer (clambda)
   (let ((ir1-flow (make-ir1-flow clambda)))
-    (find-application-frame 'ir1-viewer :ir1-flow ir1-flow :create t :frame-class 'ir1-viewer :own-process t)))
+    (bt:make-thread (lambda ()
+                      (run-frame-top-level
+                       (make-application-frame 'ir1-viewer
+                                               :ir1-flow ir1-flow
+                                               :create t
+                                               :frame-class 'ir1-viewer))))))
 
 (defun draw-flow-pane (frame stream)
   (draw-flow (ir1-flow frame)
