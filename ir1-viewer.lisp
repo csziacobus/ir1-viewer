@@ -639,11 +639,13 @@
          (define-presentation-method highlight-presentation
              ((type ,sb-type) record (stream info-pane) state)
            (let ((frame *application-frame*))
-             (clim-internals::highlight-presentation-1
-              (gethash (presentation-object record)
-                       (ir1-node-flow-presentations frame))
-              (find-pane-named frame 'flow)
-              state))
+             (multiple-value-bind (val existsp)
+                 (gethash (presentation-object record)
+                          (ir1-node-flow-presentations frame))
+               (when existsp
+                   (clim-internals::highlight-presentation-1 val
+                                                             (find-pane-named frame 'flow)
+                                                             state))))
            (call-next-method))
          (define-ir1-presentation (,(cdr types) stream) ,@body)))))
 
